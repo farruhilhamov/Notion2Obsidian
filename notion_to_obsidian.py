@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Notion to Obsidian Converter
 Converts exported Notion pages with subpages to beautifully formatted Obsidian pages.
@@ -9,9 +10,15 @@ import os
 import re
 import shutil
 import argparse
+import sys
+import io
 from pathlib import Path
 from typing import Dict, List, Set
 import html
+
+# Fix encoding for Windows console
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 from obsidian_linter import ObsidianLinter
 from notion_database import NotionDatabaseConverter
 from utils import (
@@ -50,8 +57,8 @@ class NotionToObsidianConverter:
 
         self.log(f"Starting conversion from {self.input_dir} to {self.output_dir}")
 
-        # First pass: detect and convert databases
-        self._convert_databases()
+        # First pass: detect and convert CSV databases
+        self._convert_csv_databases()
 
         # Second pass: collect all markdown files and create mapping
         self._build_file_mapping()
@@ -62,6 +69,9 @@ class NotionToObsidianConverter:
 
         # Fourth pass: copy all assets (images, PDFs, etc.)
         self._copy_assets()
+
+        # Fifth pass: embed database queries in pages with matching folders
+        self._embed_all_database_queries()
 
         self.log(f"Conversion complete! Processed {len(self.processed_files)} files.")
         if self.databases_converted:
@@ -434,8 +444,82 @@ class NotionToObsidianConverter:
                 shutil.copy2(asset_file, dest_path)
                 self.log(f"Copied asset: {asset_file.name} -> {new_name}")
 
-    def _convert_databases(self):
-        """Detect and convert Notion databases to Obsidian Dataview format."""
+    def _embed_all_database_queries(self):
+        """
+        Post-processing step: Find all pages that have matching database folders
+        and append Dataview queries to display database items.
+
+        Logic: If "Page Name.md" has a folder "Page Name/" containing *_Database folders,
+        then append database queries to the end of Page Name.md
+        """
+        self.log("[INFO] Checking for pages with embedded databases...")
+
+        # Scan all .md files in output directory
+        for md_file in self.output_dir.rglob("*.md"):
+            # Skip database index files
+            if md_file.stem.endswith('_Index'):
+                continue
+
+            # Skip files inside _Database folders
+            if any('_Database' in str(p) for p in md_file.parents):
+                continue
+
+            # Check if there's a matching folder
+            page_stem = md_file.stem
+            matching_folder = md_file.parent / page_stem
+
+            if not matching_folder.exists() or not matching_folder.is_dir():
+                continue
+
+            # Check if this folder contains any database folders (ending with _Database)
+            database_folders = [f for f in matching_folder.iterdir()
+                              if f.is_dir() and f.name.endswith('_Database')]
+
+            if not database_folders:
+                continue
+
+            # This page has embedded databases! Add Dataview queries at the end
+            self.log(f"[DATABASE] Embedding queries for {len(database_folders)} database(s) in {md_file.name}")
+
+            # Read current content
+            with open(md_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # Check if already has database section (don't duplicate)
+            if '## Databases' in content or '## databases' in content.lower():
+                self.log(f"[SKIP] {md_file.name} already has database section")
+                continue
+
+            # Build the embedded section
+            embedded_section = "\n\n---\n\n## Databases\n\n"
+            embedded_section += "*This page contains the following databases:*\n\n"
+
+            for db_folder in sorted(database_folders):
+                # Get database name (remove _Database suffix)
+                db_name = db_folder.name.replace('_Database', '')
+
+                # Relative path from page to database folder
+                relative_db_path = f"{page_stem}/{db_folder.name}"
+
+                embedded_section += f"### {db_name}\n\n"
+                embedded_section += f"```dataview\n"
+                embedded_section += f"LIST\n"
+                embedded_section += f'FROM "{relative_db_path}"\n'
+                embedded_section += f'WHERE contains(tags, "database-item")\n'
+                embedded_section += f"SORT file.name ASC\n"
+                embedded_section += f"```\n\n"
+                embedded_section += f"*[View full database]({relative_db_path}/{db_name}_Index.md)*\n\n"
+
+            # Append to content and write back
+            updated_content = content.rstrip() + embedded_section
+
+            with open(md_file, 'w', encoding='utf-8') as f:
+                f.write(updated_content)
+
+            self.log(f"[OK] Added database queries to {md_file.name}")
+
+    def _convert_csv_databases(self):
+        """Detect and convert Notion CSV databases to Obsidian Dataview format."""
         # Find all CSV files (Notion exports databases as CSV)
         csv_files = list(self.input_dir.rglob('*.csv'))
 
@@ -469,12 +553,12 @@ class NotionToObsidianConverter:
                         'rows': result['rows_converted'],
                         'index': result['index_file']
                     })
-                    self.log(f"✓ Converted {result['rows_converted']} database rows")
+                    self.log(f"[OK] Converted {result['rows_converted']} database rows")
                 else:
-                    self.log(f"✗ Failed to convert database: {result['error']}")
+                    self.log(f"[FAIL] Failed to convert database: {result['error']}")
 
             except Exception as e:
-                self.log(f"✗ Error converting database {db_name}: {e}")
+                self.log(f"[ERROR] Error converting database {db_name}: {e}")
 
 
 def main():
@@ -503,11 +587,11 @@ Examples:
             verbose=args.verbose
         )
         converter.convert_all()
-        print(f"\n✅ Conversion successful!")
-        print(f"📁 Output saved to: {args.output_dir}")
+        print(f"\n[SUCCESS] Conversion successful!")
+        print(f"Output saved to: {args.output_dir}")
 
     except Exception as e:
-        print(f"\n❌ Error during conversion: {e}")
+        print(f"\n[ERROR] Error during conversion: {e}")
         import traceback
         traceback.print_exc()
         return 1

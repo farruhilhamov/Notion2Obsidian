@@ -1,0 +1,7 @@
+Name,Status (Select),Priority (Select),Due Date (Date),Completed (Checkbox),Tags (Multi-select),Assigned To (Text),Notes (Text)
+Finish project proposal,In Progress,High,2025-12-20,No,"work, urgent",Alice,Need to review with team
+Review code changes,Not Started,Medium,2025-12-22,No,"development, review",Bob,PR #123
+Update documentation,Done,Low,2025-12-15,Yes,documentation,Charlie,Added API examples
+Fix login bug,In Progress,High,2025-12-18,No,"bug, urgent",Alice,Issue #456
+Team meeting prep,Not Started,Medium,2025-12-25,No,meeting,Bob,Prepare slides
+Database migration,Done,High,2025-12-10,Yes,"development, database",Charlie,Successfully migrated

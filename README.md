@@ -1,12 +1,13 @@
 # Notion to Obsidian Converter
 
-A powerful automation script that converts exported Notion pages (with subpages) into beautifully formatted Obsidian pages. Includes comprehensive list handling, proper formatting conversion, and an intelligent linter to fix syntax mistakes.
+A powerful automation script that converts exported Notion pages (with subpages) into beautifully formatted Obsidian pages. Includes comprehensive list handling, **Notion database (Base) to Obsidian Dataview conversion**, proper formatting, and an intelligent linter to fix syntax mistakes.
 
 ## Features
 
 - **Complete Notion Export Conversion**: Converts entire Notion exports including nested pages and subpages
 - **List Formatting**: Properly converts all Notion list types (bullet lists, numbered lists, task lists) to Obsidian format
-- **Database Support**: Handles Notion databases and tables
+- **🎯 Database Support**: Converts Notion databases (including Base tables) to Obsidian Dataview format with interactive queries
+- **📊 Dataview Integration**: Each database row becomes a separate note with YAML frontmatter for easy management
 - **Asset Management**: Automatically copies and organizes images, PDFs, and other attachments
 - **Link Conversion**: Converts Notion internal links to Obsidian wikilinks
 - **Callout Conversion**: Transforms Notion callouts to Obsidian callout syntax
@@ -72,6 +73,34 @@ python obsidian_linter.py myfile.md --check
 
 # Validate and report issues
 python obsidian_linter.py myfile.md --validate
+```
+
+### Database Conversion
+
+The converter automatically detects and converts Notion databases (including Base tables):
+
+```bash
+python notion_to_obsidian.py ./NotionExport ./MyObsidianVault --verbose
+```
+
+**What happens to databases:**
+1. Each CSV file (Notion exports databases as CSV) is detected
+2. Each database row becomes a separate Obsidian note
+3. Properties are stored as YAML frontmatter
+4. An index file with Dataview queries is created
+5. Multiple views (table, list, filtered) are generated
+
+**📖 See [DATABASE_GUIDE.md](DATABASE_GUIDE.md) for complete database documentation!**
+
+**Example database conversion:**
+```bash
+# Or convert database standalone
+python notion_database.py ./NotionDatabase.csv ./ObsidianVault/Database
+```
+
+**Try the database example:**
+```bash
+python example_database.py
 ```
 
 ## What Gets Converted

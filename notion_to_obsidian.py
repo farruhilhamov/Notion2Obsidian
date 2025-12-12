@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Set
 import html
 from obsidian_linter import ObsidianLinter
+from notion_database import NotionDatabaseConverter
 from utils import (
     sanitize_filename,
     extract_frontmatter,
@@ -29,8 +30,10 @@ class NotionToObsidianConverter:
         self.output_dir = Path(output_dir)
         self.verbose = verbose
         self.linter = ObsidianLinter()
+        self.db_converter = NotionDatabaseConverter()
         self.file_mapping: Dict[str, str] = {}  # Maps old paths to new paths
         self.processed_files: Set[str] = set()
+        self.databases_converted = []
 
     def log(self, message: str):
         """Print log message if verbose mode is enabled."""
@@ -47,17 +50,22 @@ class NotionToObsidianConverter:
 
         self.log(f"Starting conversion from {self.input_dir} to {self.output_dir}")
 
-        # First pass: collect all markdown files and create mapping
+        # First pass: detect and convert databases
+        self._convert_databases()
+
+        # Second pass: collect all markdown files and create mapping
         self._build_file_mapping()
 
-        # Second pass: convert all files
+        # Third pass: convert all files
         for md_file in self.input_dir.rglob("*.md"):
             self._convert_file(md_file)
 
-        # Third pass: copy all assets (images, PDFs, etc.)
+        # Fourth pass: copy all assets (images, PDFs, etc.)
         self._copy_assets()
 
         self.log(f"Conversion complete! Processed {len(self.processed_files)} files.")
+        if self.databases_converted:
+            self.log(f"Converted {len(self.databases_converted)} databases to Dataview format.")
 
     def _build_file_mapping(self):
         """Build mapping of Notion file names to Obsidian file names."""
@@ -425,6 +433,48 @@ class NotionToObsidianConverter:
 
                 shutil.copy2(asset_file, dest_path)
                 self.log(f"Copied asset: {asset_file.name} -> {new_name}")
+
+    def _convert_databases(self):
+        """Detect and convert Notion databases to Obsidian Dataview format."""
+        # Find all CSV files (Notion exports databases as CSV)
+        csv_files = list(self.input_dir.rglob('*.csv'))
+
+        for csv_file in csv_files:
+            # Check if this is a database export
+            # Notion database CSVs are usually in a folder with the database name
+            # or have specific naming patterns like "Database Name.csv"
+
+            # Determine database name and output location
+            if csv_file.parent != self.input_dir:
+                # CSV in subdirectory - use parent directory name
+                db_name = self._clean_notion_filename(csv_file.parent.name)
+                relative_path = csv_file.parent.relative_to(self.input_dir)
+                db_output_dir = self.output_dir / relative_path / f'{db_name}_Database'
+            else:
+                # CSV in root - use CSV filename
+                db_name = self._clean_notion_filename(csv_file.stem)
+                db_output_dir = self.output_dir / f'{db_name}_Database'
+
+            self.log(f"Converting database: {db_name}")
+
+            try:
+                result = self.db_converter.convert_database_folder(
+                    csv_file,
+                    db_output_dir
+                )
+
+                if 'error' not in result:
+                    self.databases_converted.append({
+                        'name': db_name,
+                        'rows': result['rows_converted'],
+                        'index': result['index_file']
+                    })
+                    self.log(f"✓ Converted {result['rows_converted']} database rows")
+                else:
+                    self.log(f"✗ Failed to convert database: {result['error']}")
+
+            except Exception as e:
+                self.log(f"✗ Error converting database {db_name}: {e}")
 
 
 def main():

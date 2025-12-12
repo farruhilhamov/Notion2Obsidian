@@ -1,0 +1,237 @@
+╔══════════════════════════════════════════════════════════╗
+║     Notion Database (Base) to Obsidian Converter        ║
+╚══════════════════════════════════════════════════════════╝
+
+OVERVIEW
+--------
+Converts Notion databases (including Base list tables) to fully
+manageable Obsidian databases using the Dataview plugin.
+
+KEY FEATURES
+------------
+✅ Automatic database detection from CSV files
+✅ Each row → Separate Obsidian note
+✅ Properties → YAML frontmatter
+✅ Interactive Dataview queries
+✅ Multiple view types (table, list, filtered)
+✅ Supports all property types (text, number, date, checkbox, etc.)
+✅ Preserves data integrity
+✅ Easy to manage and extend
+
+HOW IT WORKS
+------------
+1. Notion exports databases as CSV files
+2. Converter detects CSV files automatically
+3. Creates folder structure: DatabaseName_Database/
+4. Generates individual .md file for each row
+5. Creates index file with Dataview queries
+6. Install Dataview plugin in Obsidian
+7. View and manage database interactively
+
+FILE STRUCTURE
+--------------
+Input (Notion Export):
+  Tasks.csv
+    Name, Status, Priority, Due Date, Completed
+    Task A, Done, High, 2025-12-20, Yes
+    Task B, In Progress, Medium, 2025-12-22, No
+    ...
+
+Output (Obsidian):
+  Tasks_Database/
+    ├── Task A.md          (YAML frontmatter + content)
+    ├── Task B.md          (YAML frontmatter + content)
+    ├── Task C.md          (YAML frontmatter + content)
+    └── Tasks_Index.md     (Dataview queries)
+
+EXAMPLE NOTE FILE
+-----------------
+---
+name: Task A
+status: Done
+priority: High
+due_date: 2025-12-20
+completed: true
+tags:
+  - database-item
+---
+
+# Task A
+
+## Properties
+| Property | Value |
+|----------|-------|
+| Name | Task A |
+| Status | Done |
+| Priority | High |
+
+## Notes
+*Add your notes here...*
+
+DATAVIEW QUERIES
+----------------
+The index file includes ready-to-use queries:
+
+# Table View
+```dataview
+TABLE status, priority, due_date
+FROM "Tasks_Database"
+WHERE contains(tags, "database-item")
+SORT due_date ASC
+```
+
+# Filtered View
+```dataview
+TABLE priority, due_date
+FROM "Tasks_Database"
+WHERE status = "In Progress"
+```
+
+# List View
+```dataview
+LIST
+FROM "Tasks_Database"
+WHERE completed = false
+```
+
+USAGE
+-----
+Automatic (with main converter):
+  python notion_to_obsidian.py NotionExport ObsidianVault
+
+Standalone database converter:
+  python notion_database.py Database.csv OutputFolder
+
+Run examples:
+  python example_database.py
+
+PROPERTY TYPES SUPPORTED
+------------------------
+✓ Text          → text
+✓ Number        → number
+✓ Checkbox      → boolean
+✓ Date          → date (YYYY-MM-DD)
+✓ Select        → text
+✓ Multi-select  → list
+✓ URL           → text
+✓ Email         → text
+✓ Phone         → text
+✓ Formula       → text
+✓ Relation      → list
+✓ Files         → text
+
+MANAGING YOUR DATABASE
+----------------------
+Add items:
+  - Create new .md file in database folder
+  - Add YAML frontmatter with properties
+  - Save and it appears in queries
+
+Edit items:
+  - Open note file
+  - Edit frontmatter values
+  - Dataview updates automatically
+
+Delete items:
+  - Delete the .md file
+  - Removed from all queries
+
+Search/Filter:
+  - Use Dataview WHERE clauses
+  - Create custom view files
+  - JavaScript queries for advanced logic
+
+REQUIREMENTS
+------------
+✓ Python 3.7+ (for conversion)
+✓ Obsidian (to view/manage)
+✓ Dataview plugin (free community plugin)
+
+Optional:
+✓ DB Folder plugin (spreadsheet-like editing)
+✓ Kanban plugin (board view)
+✓ Templater plugin (advanced templates)
+
+ADVANTAGES OVER NOTION
+-----------------------
+✅ Offline access
+✅ Plain text (future-proof)
+✅ Version control (Git)
+✅ No vendor lock-in
+✅ Faster performance
+✅ Custom views unlimited
+✅ Programmable queries
+✅ Free (no paid tiers)
+
+COMPARISON
+----------
+Notion Database          Obsidian + Dataview
+----------------         --------------------
+Table view          →    TABLE query
+Board view          →    Kanban plugin
+Gallery view        →    Manual/custom
+Calendar view       →    Calendar plugin
+List view           →    LIST query
+Filters             →    WHERE clause
+Sorts               →    SORT clause
+Formulas            →    Dataview calc
+Relations           →    Links
+Rollups             →    GROUP BY
+
+FILES CREATED
+-------------
+notion_database.py       - Database converter module
+DATABASE_GUIDE.md        - Complete documentation
+example_database.py      - Working examples
+DATABASE_SUMMARY.txt     - This file
+
+DOCUMENTATION
+-------------
+Quick Start:     QUICKSTART.md
+Full Guide:      DATABASE_GUIDE.md
+Examples:        example_database.py
+Main Docs:       README.md
+Project Info:    PROJECT_SUMMARY.md
+
+QUICK START
+-----------
+1. Export Notion database (Markdown & CSV)
+2. Extract ZIP
+3. Run: python notion_to_obsidian.py Input Output
+4. Install Dataview plugin in Obsidian
+5. Open {DatabaseName}_Index.md
+6. Done! View and manage your database
+
+EXAMPLES
+--------
+View examples:
+  python example_database.py
+
+This creates:
+  - Sample CSV database
+  - Converts to Obsidian format
+  - Shows file structure
+  - Displays Dataview queries
+  - Demonstrates all features
+
+SUPPORT
+-------
+Documentation:   DATABASE_GUIDE.md
+Code:            notion_database.py
+Examples:        example_database.py
+Main README:     README.md
+
+NEXT STEPS
+----------
+1. Read DATABASE_GUIDE.md for complete details
+2. Run example_database.py to see it in action
+3. Convert your Notion database
+4. Install Dataview plugin
+5. Explore and customize queries
+6. Enjoy local-first database management!
+
+═══════════════════════════════════════════════════════════
+Version: 1.0.0
+Status: Production Ready ✅
+Last Updated: 2025-12-12
+═══════════════════════════════════════════════════════════

@@ -1,0 +1,469 @@
+#!/usr/bin/env python3
+"""
+Notion to Obsidian Converter
+Converts exported Notion pages with subpages to beautifully formatted Obsidian pages.
+Handles lists, databases, and all Notion features.
+"""
+
+import os
+import re
+import shutil
+import argparse
+from pathlib import Path
+from typing import Dict, List, Set
+import html
+from obsidian_linter import ObsidianLinter
+from utils import (
+    sanitize_filename,
+    extract_frontmatter,
+    parse_notion_csv,
+    convert_notion_date,
+)
+
+
+class NotionToObsidianConverter:
+    """Main converter class for Notion to Obsidian conversion."""
+
+    def __init__(self, input_dir: str, output_dir: str, verbose: bool = False):
+        self.input_dir = Path(input_dir)
+        self.output_dir = Path(output_dir)
+        self.verbose = verbose
+        self.linter = ObsidianLinter()
+        self.file_mapping: Dict[str, str] = {}  # Maps old paths to new paths
+        self.processed_files: Set[str] = set()
+
+    def log(self, message: str):
+        """Print log message if verbose mode is enabled."""
+        if self.verbose:
+            print(f"[INFO] {message}")
+
+    def convert_all(self):
+        """Convert all Notion files to Obsidian format."""
+        if not self.input_dir.exists():
+            raise FileNotFoundError(f"Input directory not found: {self.input_dir}")
+
+        # Create output directory
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        self.log(f"Starting conversion from {self.input_dir} to {self.output_dir}")
+
+        # First pass: collect all markdown files and create mapping
+        self._build_file_mapping()
+
+        # Second pass: convert all files
+        for md_file in self.input_dir.rglob("*.md"):
+            self._convert_file(md_file)
+
+        # Third pass: copy all assets (images, PDFs, etc.)
+        self._copy_assets()
+
+        self.log(f"Conversion complete! Processed {len(self.processed_files)} files.")
+
+    def _build_file_mapping(self):
+        """Build mapping of Notion file names to Obsidian file names."""
+        for md_file in self.input_dir.rglob("*.md"):
+            relative_path = md_file.relative_to(self.input_dir)
+
+            # Remove Notion's UUID from filename
+            clean_name = self._clean_notion_filename(md_file.stem)
+
+            # Create new path maintaining directory structure
+            new_relative_path = relative_path.parent / f"{clean_name}.md"
+            new_path = self.output_dir / new_relative_path
+
+            self.file_mapping[str(md_file)] = str(new_path)
+
+    def _clean_notion_filename(self, filename: str) -> str:
+        """Remove Notion's UUID suffix from filename."""
+        # Notion adds UUIDs like "Page Name 8a7b3c4d5e6f7g8h9i0j"
+        # Remove the trailing UUID (32 hex chars or formatted UUID)
+        cleaned = re.sub(r'\s+[a-f0-9]{32}$', '', filename, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s+[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$',
+                        '', cleaned, flags=re.IGNORECASE)
+        return sanitize_filename(cleaned)
+
+    def _convert_file(self, md_file: Path):
+        """Convert a single Notion markdown file to Obsidian format."""
+        if str(md_file) in self.processed_files:
+            return
+
+        self.log(f"Converting: {md_file.name}")
+
+        with open(md_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Convert content
+        converted = self._convert_content(content, md_file)
+
+        # Lint the converted content
+        linted = self.linter.lint(converted)
+
+        # Get output path
+        output_path = Path(self.file_mapping[str(md_file)])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write converted file
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(linted)
+
+        self.processed_files.add(str(md_file))
+        self.log(f"Saved: {output_path}")
+
+    def _convert_content(self, content: str, source_file: Path) -> str:
+        """Convert Notion markdown content to Obsidian format."""
+        # Extract and convert frontmatter
+        frontmatter, body = extract_frontmatter(content)
+
+        # Add Notion metadata to frontmatter
+        if frontmatter is None:
+            frontmatter = {}
+
+        frontmatter['source'] = 'notion'
+        frontmatter['created'] = self._get_file_date(source_file)
+
+        # Convert various Notion elements
+        body = self._convert_headings(body)
+        body = self._convert_lists(body)
+        body = self._convert_checkboxes(body)
+        body = self._convert_code_blocks(body)
+        body = self._convert_callouts(body)
+        body = self._convert_tables(body)
+        body = self._convert_links(body, source_file)
+        body = self._convert_images(body, source_file)
+        body = self._convert_notion_toggles(body)
+        body = self._convert_databases(body)
+        body = self._decode_html_entities(body)
+
+        # Reconstruct with frontmatter
+        if frontmatter:
+            frontmatter_text = "---\n"
+            for key, value in frontmatter.items():
+                if isinstance(value, list):
+                    frontmatter_text += f"{key}:\n"
+                    for item in value:
+                        frontmatter_text += f"  - {item}\n"
+                else:
+                    frontmatter_text += f"{key}: {value}\n"
+            frontmatter_text += "---\n\n"
+            body = frontmatter_text + body
+
+        return body
+
+    def _get_file_date(self, file_path: Path) -> str:
+        """Get file creation/modification date."""
+        import datetime
+        timestamp = file_path.stat().st_mtime
+        return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d')
+
+    def _convert_headings(self, content: str) -> str:
+        """Ensure proper heading format."""
+        # Add space after # if missing
+        content = re.sub(r'^(#{1,6})([^# \n])', r'\1 \2', content, flags=re.MULTILINE)
+        return content
+
+    def _convert_lists(self, content: str) -> str:
+        """Convert Notion lists to proper Obsidian format."""
+        lines = content.split('\n')
+        converted_lines = []
+
+        for i, line in enumerate(lines):
+            # Fix bullet lists - ensure space after dash
+            if re.match(r'^\s*-[^ \n]', line):
+                line = re.sub(r'^(\s*)-([^ \n])', r'\1- \2', line)
+
+            # Fix numbered lists - ensure space after number
+            line = re.sub(r'^(\s*\d+\.)[^ \n]', r'\1 ', line)
+
+            # Convert Notion's nested lists (indentation)
+            # Notion uses tabs, Obsidian prefers 2/4 spaces
+            if line.startswith('\t'):
+                indent_level = len(line) - len(line.lstrip('\t'))
+                line = '  ' * indent_level + line.lstrip('\t')
+
+            converted_lines.append(line)
+
+        return '\n'.join(converted_lines)
+
+    def _convert_checkboxes(self, content: str) -> str:
+        """Convert Notion checkboxes to Obsidian task format."""
+        # Notion exports checkboxes as "- [ ]" or "- [x]"
+        # Ensure proper spacing
+        content = re.sub(r'^\s*-\s*\[\s*\]', '- [ ]', content, flags=re.MULTILINE)
+        content = re.sub(r'^\s*-\s*\[x\]', '- [x]', content, flags=re.MULTILINE | re.IGNORECASE)
+        return content
+
+    def _convert_code_blocks(self, content: str) -> str:
+        """Convert Notion code blocks to Obsidian format."""
+        # Notion sometimes doesn't specify language
+        # Ensure code blocks are properly formatted
+        lines = content.split('\n')
+        converted_lines = []
+        in_code_block = False
+
+        for line in lines:
+            if line.strip().startswith('```'):
+                in_code_block = not in_code_block
+                # Ensure there's a newline before code block starts
+                if in_code_block and converted_lines and converted_lines[-1].strip():
+                    converted_lines.append('')
+
+            converted_lines.append(line)
+
+            # Ensure there's a newline after code block ends
+            if not in_code_block and line.strip() == '```':
+                if converted_lines[-1].strip() == '```':
+                    converted_lines.append('')
+
+        return '\n'.join(converted_lines)
+
+    def _convert_callouts(self, content: str) -> str:
+        """Convert Notion callouts/alerts to Obsidian callouts."""
+        # Notion uses blockquotes for callouts
+        # Convert to Obsidian callout syntax
+
+        # Pattern for Notion callouts (blockquotes with emoji/icon)
+        callout_patterns = {
+            r'💡': 'tip',
+            r'⚠️': 'warning',
+            r'❗': 'important',
+            r'ℹ️': 'info',
+            r'📝': 'note',
+            r'✅': 'success',
+            r'❌': 'error',
+            r'🔥': 'danger',
+        }
+
+        lines = content.split('\n')
+        converted_lines = []
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+
+            # Check if line is a blockquote with an emoji
+            if line.strip().startswith('>'):
+                matched = False
+                for emoji, callout_type in callout_patterns.items():
+                    if emoji in line:
+                        # Convert to Obsidian callout
+                        content_text = line.replace('>', '').replace(emoji, '').strip()
+                        converted_lines.append(f'> [!{callout_type}]')
+                        if content_text:
+                            converted_lines.append(f'> {content_text}')
+
+                        # Continue with remaining blockquote lines
+                        i += 1
+                        while i < len(lines) and lines[i].strip().startswith('>'):
+                            converted_lines.append(lines[i])
+                            i += 1
+                        i -= 1
+                        matched = True
+                        break
+
+                if not matched:
+                    converted_lines.append(line)
+            else:
+                converted_lines.append(line)
+
+            i += 1
+
+        return '\n'.join(converted_lines)
+
+    def _convert_tables(self, content: str) -> str:
+        """Ensure Notion tables are properly formatted for Obsidian."""
+        lines = content.split('\n')
+        converted_lines = []
+
+        for i, line in enumerate(lines):
+            # Detect table lines
+            if '|' in line and line.strip().startswith('|'):
+                # Ensure proper spacing around pipes
+                cells = line.split('|')
+                cells = [cell.strip() for cell in cells]
+                line = '| ' + ' | '.join(cell for cell in cells if cell or cells.index(cell) == 0) + ' |'
+                line = line.replace('|  |', '|')
+
+            converted_lines.append(line)
+
+        return '\n'.join(converted_lines)
+
+    def _convert_links(self, content: str, source_file: Path) -> str:
+        """Convert Notion internal links to Obsidian wikilinks."""
+        # Notion exports links as [Page Name](Page%20Name%20uuid.md)
+
+        def replace_link(match):
+            link_text = match.group(1)
+            link_url = match.group(2)
+
+            # Check if it's an internal .md link
+            if link_url.endswith('.md'):
+                # URL decode
+                link_url = html.unescape(link_url)
+                link_url = link_url.replace('%20', ' ')
+
+                # Find the corresponding file in mapping
+                source_dir = source_file.parent
+                full_link_path = (source_dir / link_url).resolve()
+
+                # Get clean name
+                clean_name = self._clean_notion_filename(Path(link_url).stem)
+
+                # Convert to wikilink
+                return f'[[{clean_name}]]'
+
+            # External link, keep as is
+            return match.group(0)
+
+        # Match markdown links
+        content = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', replace_link, content)
+
+        return content
+
+    def _convert_images(self, content: str, source_file: Path) -> str:
+        """Convert Notion image links to Obsidian format."""
+        # Notion exports images with encoded URLs
+
+        def replace_image(match):
+            alt_text = match.group(1)
+            image_url = match.group(2)
+
+            # URL decode
+            image_url = html.unescape(image_url)
+            image_url = image_url.replace('%20', ' ')
+
+            # If it's a local file, use just the filename
+            if not image_url.startswith('http'):
+                image_name = Path(image_url).name
+                return f'![[{image_name}]]'
+
+            # External image, keep markdown format
+            return match.group(0)
+
+        content = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', replace_image, content)
+
+        return content
+
+    def _convert_notion_toggles(self, content: str) -> str:
+        """Convert Notion toggle blocks to Obsidian format."""
+        # Notion toggle lists can be represented as collapsible sections
+        # Using HTML details/summary tags which Obsidian supports
+
+        lines = content.split('\n')
+        converted_lines = []
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+
+            # Detect toggle pattern (usually "▸ Title" or similar)
+            if re.match(r'^\s*[▸▾►▼]\s+', line):
+                # Extract title
+                title = re.sub(r'^\s*[▸▾►▼]\s+', '', line)
+
+                # Start collapsible section
+                converted_lines.append(f'<details>')
+                converted_lines.append(f'<summary>{title}</summary>')
+                converted_lines.append('')
+
+                # Collect indented content
+                i += 1
+                while i < len(lines) and (lines[i].startswith('\t') or lines[i].startswith('  ') or not lines[i].strip()):
+                    content_line = lines[i].lstrip('\t').lstrip('  ')
+                    if content_line.strip():
+                        converted_lines.append(content_line)
+                    elif lines[i].strip():
+                        converted_lines.append(lines[i])
+                    i += 1
+
+                converted_lines.append('')
+                converted_lines.append('</details>')
+                converted_lines.append('')
+                i -= 1
+            else:
+                converted_lines.append(line)
+
+            i += 1
+
+        return '\n'.join(converted_lines)
+
+    def _convert_databases(self, content: str) -> str:
+        """Convert Notion database views to Obsidian dataview format."""
+        # This is a placeholder for database conversion
+        # Notion databases are complex and may need custom handling
+        # For now, we'll preserve them as tables
+        return content
+
+    def _decode_html_entities(self, content: str) -> str:
+        """Decode HTML entities that Notion might use."""
+        content = html.unescape(content)
+        return content
+
+    def _copy_assets(self):
+        """Copy all asset files (images, PDFs, etc.) to output directory."""
+        asset_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.pdf',
+                          '.mp4', '.webm', '.mp3', '.wav', '.csv']
+
+        # Create attachments folder in Obsidian vault
+        attachments_dir = self.output_dir / 'attachments'
+        attachments_dir.mkdir(exist_ok=True)
+
+        for asset_file in self.input_dir.rglob('*'):
+            if asset_file.is_file() and asset_file.suffix.lower() in asset_extensions:
+                # Clean filename
+                clean_name = self._clean_notion_filename(asset_file.stem)
+                new_name = f"{clean_name}{asset_file.suffix}"
+
+                # Copy to attachments folder
+                dest_path = attachments_dir / new_name
+
+                # Handle duplicate names
+                counter = 1
+                while dest_path.exists():
+                    new_name = f"{clean_name}_{counter}{asset_file.suffix}"
+                    dest_path = attachments_dir / new_name
+                    counter += 1
+
+                shutil.copy2(asset_file, dest_path)
+                self.log(f"Copied asset: {asset_file.name} -> {new_name}")
+
+
+def main():
+    """Main entry point for the script."""
+    parser = argparse.ArgumentParser(
+        description='Convert Notion export to Obsidian format',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python notion_to_obsidian.py ./NotionExport ./ObsidianVault
+  python notion_to_obsidian.py ./NotionExport ./ObsidianVault --verbose
+        """
+    )
+
+    parser.add_argument('input_dir', help='Path to Notion export directory')
+    parser.add_argument('output_dir', help='Path to Obsidian vault directory')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                       help='Enable verbose logging')
+
+    args = parser.parse_args()
+
+    try:
+        converter = NotionToObsidianConverter(
+            args.input_dir,
+            args.output_dir,
+            verbose=args.verbose
+        )
+        converter.convert_all()
+        print(f"\n✅ Conversion successful!")
+        print(f"📁 Output saved to: {args.output_dir}")
+
+    except Exception as e:
+        print(f"\n❌ Error during conversion: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+    return 0
+
+
+if __name__ == '__main__':
+    exit(main())

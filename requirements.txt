@@ -1,0 +1,19 @@
+# Notion to Obsidian Converter Dependencies
+# Python 3.7+
+
+# No external dependencies required for basic functionality
+# All functionality uses Python standard library
+
+# Optional dependencies for enhanced features:
+
+# For progress bars (optional)
+# tqdm>=4.65.0
+
+# For YAML parsing (optional, uses basic parsing by default)
+# PyYAML>=6.0
+
+# For better date parsing (optional)
+# python-dateutil>=2.8.2
+
+# For colored terminal output (optional)
+# colorama>=0.4.6
